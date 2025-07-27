@@ -70,6 +70,9 @@ class SpoolManager:
         self._register_endpoints()
         self.server.register_remote_method(
             "spoolman_set_active_spool", self.set_active_spool
+	    )
+        self.server.register_remote_method(
+            "spoolman_set_active_spool_by_filament", self.set_active_spool_by_filament
         )
 
     def _get_spoolman_urls(self, config: ConfigHelper) -> None:
@@ -289,6 +292,30 @@ class SpoolManager:
             "spoolman:active_spool_set", {"spool_id": spool_id}
         )
         logging.info(f"Setting active spool to: {spool_id}")
+
+    async def set_active_spool_by_filament(self, filament_id: int) -> None:
+        assert isinstance(filament_id, int)
+        response = await self.http_client.get(
+            f"{self.spoolman_url}/v1/spool?filament.id={filament_id}&sort=remaining_weight:asc",
+            connect_timeout=1., request_timeout=2.
+        )
+        if response.has_error():
+            err_msg = self._get_response_error(response)
+            logging.info(f"Attempt to get spools by filament ID failed: {err_msg}")
+        else:
+            spools = response.json();
+            spoolId = None;
+            assert len(spools) > 0
+            for spool in spools:
+                if spool['remaining_weight'] >= 1:
+                    spoolId = spool['id']
+                    break;
+            if (spoolId is None):
+                logging.info(f"No spool that could be used with filament ID {filament_id}, unsetting spool")
+                self.set_active_spool(None)
+                return
+            logging.info(f"Active spool set to {spoolId}")
+            self.set_active_spool(spoolId)
 
     async def report_extrusion(self, eventtime: float) -> float:
         if not self.ws_connected:
